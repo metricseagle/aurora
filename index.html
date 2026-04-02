@@ -29,6 +29,35 @@ function goFull() {
   else if (el.msRequestFullscreen)     el.msRequestFullscreen();
   document.getElementById('fsBtn').style.display='none';
 }
+
+// ── Keep screen awake ─────────────────────────────────────────────────────────
+// Method 1: WakeLock API (modern browsers)
+function requestWakeLock() {
+  if (navigator.wakeLock) {
+    navigator.wakeLock.request('screen').catch(function(){});
+  }
+}
+requestWakeLock();
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible') requestWakeLock();
+});
+
+// Method 2: tiny silent looping video — tricks iOS into keeping screen on
+(function() {
+  var v = document.createElement('video');
+  v.setAttribute('loop', '');
+  v.setAttribute('playsinline', '');
+  v.setAttribute('webkit-playsinline', '');
+  v.muted = true;
+  v.volume = 0;
+  v.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0.01;top:0;left:0;pointer-events:none;z-index:-1;';
+  // Minimal valid MP4: 1x1 px, 1 frame, silent
+  v.src = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28ybXA0MQAAAAhmcmVlAAAAGm1kYXQAAAGzABAHAAABthADAowdbb9/AAAC6W1vb3YAAABsbXZoZAAAAAAAAAAAAAAAAAAAA+gAAAAAAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAIVdHJhawAAAFx0a2hkAAAAAwAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAWAAAAFgAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAAAAAAAAAAQAAAAAAAABrRtZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAVcQAAAAAAC1oZGxyAAAAAAAAAAB2aWRlAAAAAAAAAAAAAAAAVmlkZW9IYW5kbGVyAAAABl9taW5mAAAAFHZtaGQAAAABAAAAAAAAAAAAAAAkZGluZgAAABxkcmVmAAAAAAAAAAEAAAAMdXJsIAAAAAEAAAYfc3RibAAAAK9zdHNkAAAAAAAAAAEAAACfc3R0cwAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMHN0dHMAAAAAAAAAAQAAABAAAAAAAAAAMHN0c2MAAAAAAAAAAQAAAAEAAAAQAAAAAQAAAFBzdHN6AAAAAAAAAAAAAAAQAAAAMAAAACgAAAAoAAAAKAAAACgAAAAoAAAAKAAAACgAAAAoAAAAKAAAACgAAAAoAAAAKAAAACgAAAAoAAAADHN0Y28AAAAAAAAAAQAAADAAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjU4LjQ1LjEwMA==';
+  document.body.appendChild(v);
+  function tryPlay() { v.play().catch(function(){}); }
+  tryPlay();
+  document.addEventListener('touchstart', tryPlay, { once: true });
+})();
 </script>
 <script>
 var canvas = document.getElementById('c');
