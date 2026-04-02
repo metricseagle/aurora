@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aurora</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  canvas { display: block; position: fixed; top: 0; left: 0; }
+  #c1 { z-index: 1; }
+  #c2 { z-index: 2; }
+  #c3 { z-index: 3; }
+</style>
+</head>
+<body>
+<canvas id="c1"></canvas>
+<canvas id="c2"></canvas>
+<canvas id="c3"></canvas>
+<script>
+// ── Utility ──────────────────────────────────────────────────────────────────
+function resize(canvas) {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+function rand(a, b) { return a + Math.random() * (b - a); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// ── Layer 1: Stars ────────────────────────────────────────────────────────────
+(function() {
+  const canvas = document.getElementById('c1');
+  const ctx    = canvas.getContext('2d');
+  let W, H, stars = [];
+
+  function init() {
+    resize(canvas);
+    W = canvas.width; H = canvas.height;
+    stars = [];
+    const n = Math.floor(W * H / 800);
+    for (let i = 0; i < n; i++) {
+      stars.push({
+        x:     rand(0, W),
+        y:     rand(0, H),
+        r:     rand(0.3, 1.8),
+        alpha: rand(0.2, 1),
+        speed: rand(0.0003, 0.002),
+        phase: rand(0, Math.PI * 2),
+        color: Math.random() < 0.15
+          ? `hsl(${rand(180,260)},80%,90%)`
+          : '#ffffff'
+      });
+    }
+  }
+
+  let t = 0;
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    t += 0.01;
+    for (const s of stars) {
+      const a = s.alpha * (0.5 + 0.5 * Math.sin(t * s.speed * 300 + s.phase));
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = s.color;
+      ctx.globalAlpha = a;
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', init);
+  init();
+  draw();
+})();
+
+// ── Layer 2: Aurora ───────────────────────────────────────────────────────────
+(function() {
+  const canvas = document.getElementById('c2');
+  const ctx    = canvas.getContext('2d');
+  let W, H;
+
+  // Aurora bands — each has a set of control points that drift
+  const BANDS = [
+    { hue: 160, sat: 100, base: 0.18, speed: 0.00018, amp: 0.10, wave: 0.00022 },
+    { hue: 200, sat: 100, base: 0.30, speed: 0.00014, amp: 0.08, wave: 0.00019 },
+    { hue: 260, sat:  90, base: 0.22, speed: 0.00021, amp: 0.12, wave: 0.00017 },
+    { hue: 130, sat:  80, base: 0.15, speed: 0.00016, amp: 0.07, wave: 0.00025 },
+    { hue: 300, sat:  70, base: 0.28, speed: 0.00013, amp: 0.09, wave: 0.00020 },
+  ];
+
+  const COLS = 7; // control points per band
+  const points = BANDS.map(() =>
+    Array.from({length: COLS}, (_, i) => ({
+      phase: rand(0, Math.PI * 2),
+      phase2: rand(0, Math.PI * 2),
+    }))
+  );
+
+  function init() {
+    resize(canvas);
+    W = canvas.width; H = canvas.height;
+  }
+
+  let t = 0;
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    t++;
+
+    BANDS.forEach((band, bi) => {
+      const pts = points[bi];
+      const yCenter = band.base * H + Math.sin(t * band.speed * 1000) * band.amp * H;
+      const thickness = H * (0.12 + 0.06 * Math.sin(t * band.wave * 1000 + bi));
+
+      // Build smooth curve xs & ys
+      const xs = [], ys = [];
+      for (let i = 0; i < COLS; i++) {
+        const p = pts[i];
+        xs.push((i / (COLS - 1)) * W);
+        ys.push(yCenter +
+          Math.sin(t * band.wave * 800 + p.phase) * thickness * 0.5 +
+          Math.sin(t * band.wave * 400 + p.phase2 + i * 1.3) * thickness * 0.3
+        );
+      }
+
+      // Draw filled aurora shape with gradient
+      ctx.beginPath();
+      ctx.moveTo(xs[0], ys[0]);
+      for (let i = 1; i < COLS - 1; i++) {
+        const mx = (xs[i] + xs[i+1]) / 2;
+        const my = (ys[i] + ys[i+1]) / 2;
+        ctx.quadraticCurveTo(xs[i], ys[i], mx, my);
+      }
+      ctx.lineTo(xs[COLS-1], ys[COLS-1]);
+
+      // Bottom of aurora (thicker fade)
+      for (let i = COLS - 1; i >= 0; i--) {
+        const p = pts[i];
+        const bottomY = ys[i] + thickness +
+          Math.sin(t * band.wave * 600 + p.phase + 2) * thickness * 0.2;
+        if (i === COLS - 1) ctx.lineTo(xs[i], bottomY);
+        else {
+          const mx = (xs[i] + xs[i+1]) / 2;
+          const bprev = ys[i+1] + thickness +
+            Math.sin(t * band.wave * 600 + pts[i+1].phase + 2) * thickness * 0.2;
+          const my = (bottomY + bprev) / 2;
+          ctx.quadraticCurveTo(xs[i+1], bprev, mx, my);
+        }
+      }
+      ctx.closePath();
+
+      // Vertical gradient for each band
+      const gy = ctx.createLinearGradient(0, yCenter - thickness * 0.3, 0, yCenter + thickness * 1.2);
+      gy.addColorStop(0,   `hsla(${band.hue},${band.sat}%,70%, 0)`);
+      gy.addColorStop(0.3, `hsla(${band.hue},${band.sat}%,65%, 0.18)`);
+      gy.addColorStop(0.6, `hsla(${band.hue},${band.sat}%,60%, 0.22)`);
+      gy.addColorStop(1,   `hsla(${band.hue},${band.sat}%,55%, 0)`);
+
+      ctx.fillStyle = gy;
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fill();
+    });
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', init);
+  init();
+  draw();
+})();
+
+// ── Layer 3: Flowing Particles ────────────────────────────────────────────────
+(function() {
+  const canvas = document.getElementById('c3');
+  const ctx    = canvas.getContext('2d');
+  let W, H, particles = [];
+
+  const COLORS = [
+    [160, 100, 75],
+    [200,  90, 80],
+    [260,  80, 85],
+    [130,  80, 70],
+    [300,  70, 80],
+    [  0,   0,100],
+  ];
+
+  function mkParticle() {
+    const col = COLORS[Math.floor(Math.random() * COLORS.length)];
+    const side = Math.random() < 0.5 ? 'bottom' : 'side';
+    let x, y, vx, vy;
+    if (side === 'bottom') {
+      x = rand(0, W); y = H + 5;
+      vx = rand(-0.4, 0.4);
+      vy = rand(-1.5, -0.4);
+    } else {
+      x = Math.random() < 0.5 ? -5 : W + 5;
+      y = rand(H * 0.3, H);
+      vx = (x < 0 ? 1 : -1) * rand(0.3, 1.2);
+      vy = rand(-1.2, -0.2);
+    }
+    return {
+      x, y, vx, vy,
+      r:     rand(1, 3.5),
+      alpha: rand(0.4, 0.9),
+      hue:   col[0] + rand(-15, 15),
+      sat:   col[1],
+      lum:   col[2],
+      life:  0,
+      maxLife: rand(120, 400),
+      wobble: rand(0, Math.PI * 2),
+      wobbleSpeed: rand(0.01, 0.04),
+    };
+  }
+
+  function init() {
+    resize(canvas);
+    W = canvas.width; H = canvas.height;
+    particles = [];
+    const n = Math.floor(W * H / 3500);
+    for (let i = 0; i < n; i++) {
+      const p = mkParticle();
+      p.life = rand(0, p.maxLife); // stagger starts
+      particles.push(p);
+    }
+  }
+
+  // Gentle flow field — noise-like via sine combinations
+  function flowAngle(x, y, t) {
+    return (
+      Math.sin(x * 0.003 + t * 0.0003) * 0.8 +
+      Math.cos(y * 0.004 + t * 0.0004) * 0.6 +
+      Math.sin((x + y) * 0.002 + t * 0.0002) * 0.4
+    );
+  }
+
+  let t = 0;
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    t++;
+
+    const target = Math.floor(W * H / 3500);
+    while (particles.length < target) particles.push(mkParticle());
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life++;
+
+      if (p.life > p.maxLife || p.x < -10 || p.x > W + 10 || p.y < -10) {
+        particles[i] = mkParticle();
+        continue;
+      }
+
+      // Flow field influence
+      const angle = flowAngle(p.x, p.y, t);
+      p.vx += Math.cos(angle) * 0.015;
+      p.vy += Math.sin(angle) * 0.008;
+
+      // Damping
+      p.vx *= 0.99;
+      p.vy *= 0.99;
+
+      p.wobble += p.wobbleSpeed;
+      p.x += p.vx + Math.sin(p.wobble) * 0.3;
+      p.y += p.vy;
+
+      const lifeRatio = p.life / p.maxLife;
+      const fade = lifeRatio < 0.1
+        ? lifeRatio * 10
+        : lifeRatio > 0.8
+          ? (1 - lifeRatio) * 5
+          : 1;
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${p.hue},${p.sat}%,${p.lum}%,${p.alpha * fade})`;
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fill();
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', init);
+  init();
+  draw();
+})();
+</script>
+</body>
+</html>
