@@ -15,14 +15,18 @@
 <script>
 var canvas = document.getElementById('c');
 var ctx    = canvas.getContext('2d');
-var W, H, t = 0;
+var W, H;
+
+// T is real elapsed seconds — same on all devices regardless of fps
+var startTime = null;
+var T = 0;
 
 function resize() {
   W = canvas.width  = window.innerWidth;
   H = canvas.height = window.innerHeight;
   buildLand();
 }
-window.addEventListener('resize', resize);
+window.addEventListener('resize', function() { resize(); initStars(); initParticles(); });
 
 // ── Stars ─────────────────────────────────────────────────────────────────────
 var stars = [];
@@ -35,19 +39,19 @@ function initStars() {
       y:  Math.random() * H * 0.82,
       r:  Math.random() < 0.1 ? (0.8 + Math.random() * 1.4) : (0.2 + Math.random() * 0.6),
       a:  0.3 + Math.random() * 0.7,
-      sp: 0.005 + Math.random() * 0.02,
+      sp: 0.5 + Math.random() * 2.0,   // cycles per second
       ph: Math.random() * 6.28,
     });
   }
 }
 
-// ── Aurora bands ──────────────────────────────────────────────────────────────
+// ── Aurora bands — all timing in seconds ─────────────────────────────────────
 var BANDS = [
-  { base: 0.22, hue: 155, amp: 0.11, sp: 0.00018, wsp: 0.00022, th: 0.20, br: 0.28 },
-  { base: 0.30, hue: 200, amp: 0.09, sp: 0.00014, wsp: 0.00018, th: 0.18, br: 0.24 },
-  { base: 0.18, hue: 265, amp: 0.12, sp: 0.00020, wsp: 0.00024, th: 0.17, br: 0.22 },
-  { base: 0.38, hue: 145, amp: 0.08, sp: 0.00016, wsp: 0.00019, th: 0.15, br: 0.20 },
-  { base: 0.14, hue: 345, amp: 0.07, sp: 0.00022, wsp: 0.00026, th: 0.14, br: 0.17 },
+  { base:0.22, hue:155, amp:0.11, sp:0.18, wsp:0.22, th:0.20, br:0.28 },
+  { base:0.30, hue:200, amp:0.09, sp:0.14, wsp:0.18, th:0.18, br:0.24 },
+  { base:0.18, hue:265, amp:0.12, sp:0.20, wsp:0.24, th:0.17, br:0.22 },
+  { base:0.38, hue:145, amp:0.08, sp:0.16, wsp:0.19, th:0.15, br:0.20 },
+  { base:0.14, hue:345, amp:0.07, sp:0.22, wsp:0.26, th:0.14, br:0.17 },
 ];
 var COLS = 6;
 var bpts = BANDS.map(function() {
@@ -61,38 +65,44 @@ var particles = [];
 function initParticles() {
   particles = [];
   var n = Math.floor(W * H / 8000);
-  for (var i = 0; i < n; i++) particles.push(mkP());
+  for (var i = 0; i < n; i++) {
+    var p = mkP();
+    p.life = Math.random() * p.maxLife; // stagger so they don't all start together
+    particles.push(p);
+  }
 }
 function mkP() {
   var hues = [155, 195, 265, 340, 45];
   return {
     x: Math.random() * W,
     y: H * 0.1 + Math.random() * H * 0.55,
-    vx: -0.3 + Math.random() * 0.6,
-    vy: -0.7 - Math.random() * 0.5,
-    r: 0.8 + Math.random() * 2.0,
-    a: 0.2 + Math.random() * 0.5,
+    vx: (-0.3 + Math.random() * 0.6) * 30,   // pixels per second
+    vy: (-0.7 - Math.random() * 0.5) * 30,
+    r:  0.8 + Math.random() * 2.0,
+    a:  0.2 + Math.random() * 0.5,
     hue: hues[Math.floor(Math.random() * hues.length)],
     life: 0,
-    maxLife: 200 + Math.random() * 350,
+    maxLife: 6 + Math.random() * 10,   // seconds
     wob: Math.random() * 6.28,
-    ws: 0.01 + Math.random() * 0.025,
+    ws:  1.0 + Math.random() * 2.5,    // radians per second
   };
 }
 
 // ── Shooting stars ────────────────────────────────────────────────────────────
-var meteors = [], nextMeteor = 150 + Math.random() * 250;
+var meteors = [];
+var nextMeteorAt = 4 + Math.random() * 8; // seconds from start
 function mkMeteor() {
   return {
-    x: W * 0.1 + Math.random() * W * 0.8,
-    y: -40 + Math.random() * H * 0.08,
-    vx: -4 - Math.random() * 6,
-    vy:  5 + Math.random() * 9,
+    x:   W * 0.1 + Math.random() * W * 0.8,
+    y:   -40 + Math.random() * H * 0.08,
+    vx:  (-4 - Math.random() * 6) * 30,   // px/s
+    vy:  ( 5 + Math.random() * 9) * 30,
     len: 80 + Math.random() * 160,
     a:   0.6 + Math.random() * 0.4,
     hue: 180 + Math.random() * 120,
     w:   1.5 + Math.random() * 1.5,
-    life: 0,
+    dur: 1.2 + Math.random() * 0.8,  // seconds to live
+    age: 0,
   };
 }
 
@@ -125,7 +135,6 @@ function buildLand() {
   mg.addColorStop(0,'#0c0e18'); mg.addColorStop(1,'#050609');
   lc.fillStyle = mg; lc.fill();
 
-  // Treeline
   var tBaseY = H - MH * 0.36;
   lc.beginPath();
   lc.moveTo(0, tBaseY + 12);
@@ -144,32 +153,31 @@ function buildLand() {
   lc.fillStyle = '#02030a'; lc.fill();
 }
 
-// ── Main loop — throttled to 30fps ────────────────────────────────────────────
-var lastFrame = 0;
-var FRAME_MS  = 34;
-
+// ── Aurora draw ───────────────────────────────────────────────────────────────
 function drawAuroraBand(band, bi) {
   var P     = bpts[bi];
-  var yBase = band.base*H + Math.sin(t*band.sp*1000)*band.amp*H;
-  var thick = band.th*H*(0.85 + 0.15*Math.sin(t*band.wsp*900+bi));
-  var hue   = band.hue + Math.sin(t*band.sp*700+bi)*18;
+  var yBase = band.base*H + Math.sin(T*band.sp)*band.amp*H;
+  var thick = band.th*H*(0.85 + 0.15*Math.sin(T*band.wsp+bi));
+  var hue   = band.hue + Math.sin(T*band.sp*0.7+bi)*18;
   var topX=[], topY=[], botY=[];
   for (var i=0;i<COLS;i++) {
     var p=P[i];
     topX.push(i/(COLS-1)*W);
     topY.push(yBase
-      +Math.sin(t*band.wsp*800+p.ph)*thick*0.5
-      +Math.sin(t*band.wsp*400+p.ph2+i*1.2)*thick*0.25);
-    botY.push(topY[i]+thick+Math.sin(t*band.wsp*500+p.ph+2)*thick*0.18);
+      + Math.sin(T*band.wsp+p.ph)*thick*0.5
+      + Math.sin(T*band.wsp*0.5+p.ph2+i*1.2)*thick*0.25);
+    botY.push(topY[i]+thick + Math.sin(T*band.wsp*0.6+p.ph+2)*thick*0.18);
   }
   ctx.beginPath();
   ctx.moveTo(topX[0],topY[0]);
   for (var i=1;i<COLS-1;i++) {
-    ctx.quadraticCurveTo(topX[i],topY[i],(topX[i]+topX[i+1])/2,(topY[i]+topY[i+1])/2);
+    ctx.quadraticCurveTo(topX[i],topY[i],
+      (topX[i]+topX[i+1])/2,(topY[i]+topY[i+1])/2);
   }
   ctx.lineTo(topX[COLS-1],topY[COLS-1]);
   for (var i=COLS-1;i>0;i--) {
-    ctx.quadraticCurveTo(topX[i],botY[i],(topX[i-1]+topX[i])/2,(botY[i-1]+botY[i])/2);
+    ctx.quadraticCurveTo(topX[i],botY[i],
+      (topX[i-1]+topX[i])/2,(botY[i-1]+botY[i])/2);
   }
   ctx.closePath();
   var gy=ctx.createLinearGradient(0,yBase-thick*0.2,0,yBase+thick*1.3);
@@ -181,14 +189,21 @@ function drawAuroraBand(band, bi) {
   ctx.fillStyle=gy; ctx.fill();
 }
 
+// ── Main loop ─────────────────────────────────────────────────────────────────
+var lastNow = null;
+
 function loop(now) {
   requestAnimationFrame(loop);
-  if (now - lastFrame < FRAME_MS) return;
-  lastFrame = now;
-  t++;
+
+  if (startTime === null) startTime = now;
+  if (lastNow === null)   lastNow   = now;
+
+  var dt = Math.min((now - lastNow) / 1000, 0.1); // delta seconds, capped at 100ms
+  lastNow = now;
+  T = (now - startTime) / 1000; // total elapsed seconds
 
   // Sky
-  var pulse = 0.5 + 0.5*Math.sin(t*0.003);
+  var pulse = 0.5 + 0.5*Math.sin(T*0.3);
   var bg = ctx.createRadialGradient(W*0.5,H*0.3,0,W*0.5,H*0.5,Math.max(W,H)*0.9);
   bg.addColorStop(0,   'hsla(220,60%,'+(5+2*pulse)+'%,1)');
   bg.addColorStop(0.5, 'hsla(230,70%,'+(3+pulse)+'%,1)');
@@ -198,7 +213,7 @@ function loop(now) {
   // Stars
   for (var i=0;i<stars.length;i++) {
     var s=stars[i];
-    var tw=0.35+0.65*Math.sin(t*s.sp*5+s.ph);
+    var tw=0.35+0.65*Math.sin(T*s.sp+s.ph);
     ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,6.28);
     ctx.fillStyle='rgba(255,255,255,'+(s.a*tw)+')'; ctx.fill();
   }
@@ -209,38 +224,45 @@ function loop(now) {
 
   // Particles
   for (var i=particles.length-1;i>=0;i--) {
-    var p=particles[i]; p.life++;
-    if (p.life>p.maxLife||p.y<-10) { particles[i]=mkP(); continue; }
-    p.wob+=p.ws; p.x+=p.vx+Math.sin(p.wob)*0.25; p.y+=p.vy;
-    var lr=p.life/p.maxLife;
-    var fade=lr<0.12?lr/0.12:lr>0.75?(1-lr)/0.25:1;
+    var p=particles[i];
+    p.life += dt;
+    if (p.life > p.maxLife || p.y < -10) { particles[i]=mkP(); continue; }
+    p.wob += p.ws * dt;
+    p.x   += (p.vx + Math.sin(p.wob)*25) * dt;
+    p.y   += p.vy * dt;
+    var lr   = p.life / p.maxLife;
+    var fade = lr<0.12 ? lr/0.12 : lr>0.75 ? (1-lr)/0.25 : 1;
     ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,6.28);
     ctx.fillStyle='hsla('+p.hue+',75%,72%,'+(p.a*fade)+')'; ctx.fill();
   }
   ctx.globalCompositeOperation='source-over';
 
   // Shooting stars
-  if (t>=nextMeteor) {
+  if (T >= nextMeteorAt) {
     meteors.push(mkMeteor());
-    nextMeteor=t+100+Math.random()*300;
+    nextMeteorAt = T + 3 + Math.random() * 10;
   }
   ctx.globalCompositeOperation='screen';
   for (var i=meteors.length-1;i>=0;i--) {
-    var m=meteors[i]; m.x+=m.vx; m.y+=m.vy; m.life++;
-    if (m.y>H+60||m.x<-150) { meteors.splice(i,1); continue; }
-    var fade=Math.max(0,1-m.life/45);
-    var spd=Math.sqrt(m.vx*m.vx+m.vy*m.vy);
-    var tx=m.x-m.vx/spd*m.len, ty=m.y-m.vy/spd*m.len;
-    var mg2=ctx.createLinearGradient(tx,ty,m.x,m.y);
-    mg2.addColorStop(0,'hsla('+m.hue+',80%,90%,0)');
-    mg2.addColorStop(0.7,'hsla('+m.hue+',80%,88%,'+(m.a*fade*0.4)+')');
-    mg2.addColorStop(1,'hsla('+m.hue+',90%,100%,'+(m.a*fade)+')');
+    var m=meteors[i];
+    m.age += dt;
+    m.x   += m.vx * dt;
+    m.y   += m.vy * dt;
+    if (m.age > m.dur || m.y > H+60 || m.x < -150) { meteors.splice(i,1); continue; }
+    var fade = Math.max(0, 1 - m.age/m.dur);
+    var spd  = Math.sqrt(m.vx*m.vx + m.vy*m.vy);
+    var tx   = m.x - m.vx/spd*m.len;
+    var ty   = m.y - m.vy/spd*m.len;
+    var mg2  = ctx.createLinearGradient(tx,ty,m.x,m.y);
+    mg2.addColorStop(0,   'hsla('+m.hue+',80%,90%,0)');
+    mg2.addColorStop(0.7, 'hsla('+m.hue+',80%,88%,'+(m.a*fade*0.4)+')');
+    mg2.addColorStop(1,   'hsla('+m.hue+',90%,100%,'+(m.a*fade)+')');
     ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(m.x,m.y);
     ctx.strokeStyle=mg2; ctx.lineWidth=m.w; ctx.lineCap='round'; ctx.stroke();
   }
   ctx.globalCompositeOperation='source-over';
 
-  // Landscape (single drawImage — very cheap)
+  // Landscape
   ctx.drawImage(landCanvas,0,0);
 }
 
