@@ -17,260 +17,240 @@
 <canvas id="c"></canvas>
 <script>
 var canvas = document.getElementById('c');
-var ctx    = canvas.getContext('2d');
-var W, H;
+var ctx = canvas.getContext('2d');
+var W, H, T = 0, startTime = null, lastNow = null;
 
-// T is real elapsed seconds — same on all devices regardless of fps
-var startTime = null;
-var T = 0;
-
+// ── Resize ────────────────────────────────────────────────────────────────────
 function resize() {
   W = canvas.width  = window.innerWidth;
   H = canvas.height = window.innerHeight;
   buildLand();
+  initStars();
 }
-window.addEventListener('resize', function() { resize(); initStars(); initParticles(); });
+window.addEventListener('resize', resize);
 
-// ── Stars ─────────────────────────────────────────────────────────────────────
-var stars = [];
+// ── Stars — fixed, no twinkle, drawn as one big batch ────────────────────────
+// Pre-built into an offscreen canvas so main loop just does one drawImage
+var starCanvas = document.createElement('canvas');
+var starCtx    = starCanvas.getContext('2d');
 function initStars() {
-  stars = [];
-  var n = Math.floor(W * H / 900);
+  starCanvas.width  = W;
+  starCanvas.height = H;
+  starCtx.clearRect(0, 0, W, H);
+  var n = Math.floor(W * H / 1200);
   for (var i = 0; i < n; i++) {
-    stars.push({
-      x:  Math.random() * W,
-      y:  Math.random() * H * 0.82,
-      r:  Math.random() < 0.1 ? (0.8 + Math.random() * 1.4) : (0.2 + Math.random() * 0.6),
-      a:  0.3 + Math.random() * 0.7,
-      sp: 0.5 + Math.random() * 2.0,   // cycles per second
-      ph: Math.random() * 6.28,
-    });
+    var x = Math.random() * W;
+    var y = Math.random() * H * 0.80;
+    var r = Math.random() < 0.08 ? (0.9 + Math.random() * 1.2) : (0.2 + Math.random() * 0.5);
+    var a = 0.3 + Math.random() * 0.7;
+    starCtx.beginPath();
+    starCtx.arc(x, y, r, 0, 6.28);
+    starCtx.fillStyle = 'rgba(255,255,255,' + a + ')';
+    starCtx.fill();
   }
 }
 
-// ── Aurora bands — all timing in seconds ─────────────────────────────────────
+// ── Aurora — 3 bands, 4 control points, NO screen blend ──────────────────────
+// Colors chosen to look vivid without needing screen compositing
 var BANDS = [
-  { base:0.22, hue:155, amp:0.11, sp:0.18, wsp:0.22, th:0.20, br:0.28 },
-  { base:0.30, hue:200, amp:0.09, sp:0.14, wsp:0.18, th:0.18, br:0.24 },
-  { base:0.18, hue:265, amp:0.12, sp:0.20, wsp:0.24, th:0.17, br:0.22 },
-  { base:0.38, hue:145, amp:0.08, sp:0.16, wsp:0.19, th:0.15, br:0.20 },
-  { base:0.14, hue:345, amp:0.07, sp:0.22, wsp:0.26, th:0.14, br:0.17 },
+  { base:0.22, hue:155, amp:0.11, sp:0.16, wsp:0.20, th:0.22, br:0.55 },
+  { base:0.30, hue:200, amp:0.09, sp:0.12, wsp:0.16, th:0.19, br:0.45 },
+  { base:0.17, hue:265, amp:0.10, sp:0.19, wsp:0.22, th:0.17, br:0.40 },
 ];
-var COLS = 6;
+var COLS = 5;
 var bpts = BANDS.map(function() {
-  var arr = [];
-  for (var i = 0; i < COLS; i++) arr.push({ ph: Math.random()*6.28, ph2: Math.random()*6.28 });
-  return arr;
+  var a = [];
+  for (var i = 0; i < COLS; i++) a.push({ ph: Math.random()*6.28, ph2: Math.random()*6.28 });
+  return a;
 });
 
-// ── Particles ─────────────────────────────────────────────────────────────────
-var particles = [];
-function initParticles() {
-  particles = [];
-  var n = Math.floor(W * H / 8000);
-  for (var i = 0; i < n; i++) {
-    var p = mkP();
-    p.life = Math.random() * p.maxLife; // stagger so they don't all start together
-    particles.push(p);
-  }
-}
-function mkP() {
-  var hues = [155, 195, 265, 340, 45];
-  return {
-    x: Math.random() * W,
-    y: H * 0.1 + Math.random() * H * 0.55,
-    vx: (-0.3 + Math.random() * 0.6) * 30,   // pixels per second
-    vy: (-0.7 - Math.random() * 0.5) * 30,
-    r:  0.8 + Math.random() * 2.0,
-    a:  0.2 + Math.random() * 0.5,
-    hue: hues[Math.floor(Math.random() * hues.length)],
-    life: 0,
-    maxLife: 6 + Math.random() * 10,   // seconds
-    wob: Math.random() * 6.28,
-    ws:  1.0 + Math.random() * 2.5,    // radians per second
-  };
-}
-
-// ── Shooting stars ────────────────────────────────────────────────────────────
-var meteors = [];
-var nextMeteorAt = 4 + Math.random() * 8; // seconds from start
-function mkMeteor() {
-  return {
-    x:   W * 0.1 + Math.random() * W * 0.8,
-    y:   -40 + Math.random() * H * 0.08,
-    vx:  (-4 - Math.random() * 6) * 30,   // px/s
-    vy:  ( 5 + Math.random() * 9) * 30,
-    len: 80 + Math.random() * 160,
-    a:   0.6 + Math.random() * 0.4,
-    hue: 180 + Math.random() * 120,
-    w:   1.5 + Math.random() * 1.5,
-    dur: 1.2 + Math.random() * 0.8,  // seconds to live
-    age: 0,
-  };
-}
-
-// ── Landscape — drawn once to offscreen canvas ────────────────────────────────
-var landCanvas = document.createElement('canvas');
-var landCtx    = landCanvas.getContext('2d');
-function buildLand() {
-  landCanvas.width  = W;
-  landCanvas.height = H;
-  var lc = landCtx;
-  lc.clearRect(0, 0, W, H);
-  var MH = H * 0.18;
-  var peaks = [
-    [0,H],[W*0.05,H-MH*0.52],[W*0.13,H-MH*0.88],
-    [W*0.22,H-MH*0.48],[W*0.31,H-MH*0.97],
-    [W*0.40,H-MH*0.60],[W*0.48,H-MH*1.00],
-    [W*0.56,H-MH*0.63],[W*0.63,H-MH*0.86],
-    [W*0.71,H-MH*0.50],[W*0.78,H-MH*0.79],
-    [W*0.85,H-MH*0.44],[W*0.92,H-MH*0.81],
-    [W*0.97,H-MH*0.54],[W,H],
-  ];
-  lc.beginPath();
-  lc.moveTo(peaks[0][0], peaks[0][1]);
-  for (var i = 1; i < peaks.length - 1; i++) {
-    lc.quadraticCurveTo(peaks[i][0], peaks[i][1],
-      (peaks[i][0]+peaks[i+1][0])/2, (peaks[i][1]+peaks[i+1][1])/2);
-  }
-  lc.lineTo(W,H); lc.lineTo(0,H); lc.closePath();
-  var mg = lc.createLinearGradient(0, H-MH, 0, H);
-  mg.addColorStop(0,'#0c0e18'); mg.addColorStop(1,'#050609');
-  lc.fillStyle = mg; lc.fill();
-
-  var tBaseY = H - MH * 0.36;
-  lc.beginPath();
-  lc.moveTo(0, tBaseY + 12);
-  var tc = Math.floor(W / 10);
-  for (var i = 0; i <= tc; i++) {
-    var x  = i / tc * W;
-    var by = tBaseY + (-8 + Math.random()*16) + Math.sin(x*0.025)*H*0.01;
-    var th = H*0.03 + Math.random()*H*0.05;
-    var tw = 5 + Math.random()*9;
-    lc.lineTo(x-tw*0.5, by);
-    lc.lineTo(x, by-th);
-    lc.lineTo(x+tw*0.5, by);
-  }
-  lc.lineTo(W, tBaseY+12);
-  lc.lineTo(W,H); lc.lineTo(0,H); lc.closePath();
-  lc.fillStyle = '#02030a'; lc.fill();
-}
-
-// ── Aurora draw ───────────────────────────────────────────────────────────────
 function drawAuroraBand(band, bi) {
   var P     = bpts[bi];
   var yBase = band.base*H + Math.sin(T*band.sp)*band.amp*H;
   var thick = band.th*H*(0.85 + 0.15*Math.sin(T*band.wsp+bi));
-  var hue   = band.hue + Math.sin(T*band.sp*0.7+bi)*18;
+  var hue   = band.hue + Math.sin(T*band.sp*0.6+bi)*20;
+
   var topX=[], topY=[], botY=[];
-  for (var i=0;i<COLS;i++) {
-    var p=P[i];
+  for (var i=0; i<COLS; i++) {
+    var p = P[i];
     topX.push(i/(COLS-1)*W);
     topY.push(yBase
-      + Math.sin(T*band.wsp+p.ph)*thick*0.5
-      + Math.sin(T*band.wsp*0.5+p.ph2+i*1.2)*thick*0.25);
-    botY.push(topY[i]+thick + Math.sin(T*band.wsp*0.6+p.ph+2)*thick*0.18);
+      + Math.sin(T*band.wsp       + p.ph       )*thick*0.50
+      + Math.sin(T*band.wsp*0.45  + p.ph2+i*1.2)*thick*0.22);
+    botY.push(topY[i] + thick
+      + Math.sin(T*band.wsp*0.55 + p.ph+2)*thick*0.15);
   }
+
   ctx.beginPath();
-  ctx.moveTo(topX[0],topY[0]);
-  for (var i=1;i<COLS-1;i++) {
+  ctx.moveTo(topX[0], topY[0]);
+  for (var i=1; i<COLS-1; i++) {
     ctx.quadraticCurveTo(topX[i],topY[i],
       (topX[i]+topX[i+1])/2,(topY[i]+topY[i+1])/2);
   }
-  ctx.lineTo(topX[COLS-1],topY[COLS-1]);
-  for (var i=COLS-1;i>0;i--) {
+  ctx.lineTo(topX[COLS-1], topY[COLS-1]);
+  for (var i=COLS-1; i>0; i--) {
     ctx.quadraticCurveTo(topX[i],botY[i],
       (topX[i-1]+topX[i])/2,(botY[i-1]+botY[i])/2);
   }
   ctx.closePath();
-  var gy=ctx.createLinearGradient(0,yBase-thick*0.2,0,yBase+thick*1.3);
-  gy.addColorStop(0,   'hsla('+hue+',92%,72%,0)');
-  gy.addColorStop(0.2, 'hsla('+hue+',90%,68%,'+(band.br*0.6)+')');
-  gy.addColorStop(0.5, 'hsla('+hue+',88%,63%,'+band.br+')');
-  gy.addColorStop(0.8, 'hsla('+hue+',85%,58%,'+(band.br*0.6)+')');
-  gy.addColorStop(1,   'hsla('+hue+',80%,48%,0)');
-  ctx.fillStyle=gy; ctx.fill();
+
+  // Single linear gradient — no screen blend needed, just higher alpha
+  var gy = ctx.createLinearGradient(0, yBase-thick*0.1, 0, yBase+thick*1.2);
+  gy.addColorStop(0,   'hsla('+hue+',90%,60%,0)');
+  gy.addColorStop(0.25,'hsla('+hue+',88%,58%,'+(band.br*0.7)+')');
+  gy.addColorStop(0.55,'hsla('+hue+',86%,55%,'+band.br+')');
+  gy.addColorStop(0.80,'hsla('+hue+',84%,50%,'+(band.br*0.6)+')');
+  gy.addColorStop(1,   'hsla('+hue+',80%,40%,0)');
+  ctx.fillStyle = gy;
+  ctx.fill();
+}
+
+// ── Particles — very few, simple movement ────────────────────────────────────
+var particles = [];
+function initParticles() {
+  particles = [];
+  var n = Math.min(12, Math.floor(W * H / 12000));
+  for (var i=0; i<n; i++) {
+    var p = mkP();
+    p.life = Math.random() * p.maxLife;
+    particles.push(p);
+  }
+}
+function mkP() {
+  var hues = [155, 195, 265];
+  return {
+    x: Math.random()*W, y: H*0.15 + Math.random()*H*0.5,
+    vx: (-0.2+Math.random()*0.4)*28,
+    vy: (-0.5-Math.random()*0.4)*28,
+    r: 1.0+Math.random()*1.8,
+    a: 0.3+Math.random()*0.4,
+    hue: hues[Math.floor(Math.random()*hues.length)],
+    life:0, maxLife: 7+Math.random()*9,
+    wob: Math.random()*6.28, ws: 0.8+Math.random()*2.0,
+  };
+}
+
+// ── Shooting stars — infrequent ───────────────────────────────────────────────
+var meteors = [], nextMeteorAt = 5+Math.random()*10;
+function mkMeteor() {
+  return {
+    x: W*0.15+Math.random()*W*0.7, y: -30+Math.random()*H*0.06,
+    vx: (-4-Math.random()*5)*28, vy: (4+Math.random()*7)*28,
+    len: 90+Math.random()*140, a: 0.7+Math.random()*0.3,
+    hue: 190+Math.random()*100, w: 1.5+Math.random()*1.2,
+    dur: 1.0+Math.random()*0.8, age:0,
+  };
+}
+
+// ── Landscape offscreen ───────────────────────────────────────────────────────
+var landCanvas = document.createElement('canvas');
+var landCtx    = landCanvas.getContext('2d');
+function buildLand() {
+  landCanvas.width = W; landCanvas.height = H;
+  var lc = landCtx;
+  lc.clearRect(0,0,W,H);
+  var MH = H*0.18;
+  var peaks = [
+    [0,H],[W*.05,H-MH*.52],[W*.13,H-MH*.88],
+    [W*.22,H-MH*.48],[W*.31,H-MH*.97],
+    [W*.40,H-MH*.60],[W*.48,H-MH*1.0],
+    [W*.56,H-MH*.63],[W*.63,H-MH*.86],
+    [W*.71,H-MH*.50],[W*.78,H-MH*.79],
+    [W*.85,H-MH*.44],[W*.92,H-MH*.81],
+    [W*.97,H-MH*.54],[W,H],
+  ];
+  lc.beginPath();
+  lc.moveTo(peaks[0][0],peaks[0][1]);
+  for (var i=1;i<peaks.length-1;i++) {
+    lc.quadraticCurveTo(peaks[i][0],peaks[i][1],
+      (peaks[i][0]+peaks[i+1][0])/2,(peaks[i][1]+peaks[i+1][1])/2);
+  }
+  lc.lineTo(W,H); lc.lineTo(0,H); lc.closePath();
+  var mg=lc.createLinearGradient(0,H-MH,0,H);
+  mg.addColorStop(0,'#0c0e18'); mg.addColorStop(1,'#050609');
+  lc.fillStyle=mg; lc.fill();
+
+  var tBaseY=H-MH*0.36;
+  lc.beginPath(); lc.moveTo(0,tBaseY+12);
+  var tc=Math.floor(W/10);
+  for (var i=0;i<=tc;i++) {
+    var x=i/tc*W;
+    var by=tBaseY+(-8+Math.random()*16)+Math.sin(x*.025)*H*.01;
+    var th=H*.03+Math.random()*H*.05;
+    var tw=5+Math.random()*9;
+    lc.lineTo(x-tw*.5,by); lc.lineTo(x,by-th); lc.lineTo(x+tw*.5,by);
+  }
+  lc.lineTo(W,tBaseY+12); lc.lineTo(W,H); lc.lineTo(0,H); lc.closePath();
+  lc.fillStyle='#02030a'; lc.fill();
+}
+
+// ── Sky — redrawn only every 2s to save fill cost ────────────────────────────
+var skyCanvas = document.createElement('canvas');
+var skyCtx    = skyCanvas.getContext('2d');
+var lastSkyT  = -99;
+function buildSky() {
+  skyCanvas.width = W; skyCanvas.height = H;
+  lastSkyT = T;
+  var pulse = 0.5+0.5*Math.sin(T*0.3);
+  var g = skyCtx.createRadialGradient(W*.5,H*.25,0,W*.5,H*.5,Math.max(W,H)*.9);
+  g.addColorStop(0,  'hsla(220,60%,'+(5+2*pulse)+'%,1)');
+  g.addColorStop(.5, 'hsla(230,70%,'+(3+pulse)+'%,1)');
+  g.addColorStop(1,  'hsla(240,80%,2%,1)');
+  skyCtx.fillStyle = g;
+  skyCtx.fillRect(0,0,W,H);
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
-var lastNow = null;
-
 function loop(now) {
   requestAnimationFrame(loop);
-
-  if (startTime === null) startTime = now;
-  if (lastNow === null)   lastNow   = now;
-
-  var dt = Math.min((now - lastNow) / 1000, 0.1); // delta seconds, capped at 100ms
+  if (startTime === null) { startTime = now; lastNow = now; buildSky(); }
+  var dt = Math.min((now-lastNow)/1000, 0.1);
   lastNow = now;
-  T = (now - startTime) / 1000; // total elapsed seconds
+  T = (now-startTime)/1000;
 
-  // Sky
-  var pulse = 0.5 + 0.5*Math.sin(T*0.3);
-  var bg = ctx.createRadialGradient(W*0.5,H*0.3,0,W*0.5,H*0.5,Math.max(W,H)*0.9);
-  bg.addColorStop(0,   'hsla(220,60%,'+(5+2*pulse)+'%,1)');
-  bg.addColorStop(0.5, 'hsla(230,70%,'+(3+pulse)+'%,1)');
-  bg.addColorStop(1,   'hsla(240,80%,2%,1)');
-  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  // Sky — cheap drawImage, rebuild only every 2s
+  if (T - lastSkyT > 2) buildSky();
+  ctx.drawImage(skyCanvas, 0, 0);
 
-  // Stars
-  for (var i=0;i<stars.length;i++) {
-    var s=stars[i];
-    var tw=0.35+0.65*Math.sin(T*s.sp+s.ph);
-    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,6.28);
-    ctx.fillStyle='rgba(255,255,255,'+(s.a*tw)+')'; ctx.fill();
-  }
+  // Stars — static image, one call
+  ctx.drawImage(starCanvas, 0, 0);
 
-  // Aurora
-  ctx.globalCompositeOperation='screen';
-  for (var bi=0;bi<BANDS.length;bi++) drawAuroraBand(BANDS[bi],bi);
+  // Aurora — 3 bands, no screen blend
+  for (var bi=0; bi<BANDS.length; bi++) drawAuroraBand(BANDS[bi], bi);
 
   // Particles
-  for (var i=particles.length-1;i>=0;i--) {
-    var p=particles[i];
-    p.life += dt;
-    if (p.life > p.maxLife || p.y < -10) { particles[i]=mkP(); continue; }
-    p.wob += p.ws * dt;
-    p.x   += (p.vx + Math.sin(p.wob)*25) * dt;
-    p.y   += p.vy * dt;
-    var lr   = p.life / p.maxLife;
-    var fade = lr<0.12 ? lr/0.12 : lr>0.75 ? (1-lr)/0.25 : 1;
+  for (var i=particles.length-1; i>=0; i--) {
+    var p=particles[i]; p.life+=dt;
+    if (p.life>p.maxLife||p.y<-10) { particles[i]=mkP(); continue; }
+    p.wob+=p.ws*dt; p.x+=(p.vx+Math.sin(p.wob)*20)*dt; p.y+=p.vy*dt;
+    var lr=p.life/p.maxLife;
+    var fade=lr<0.12?lr/0.12:lr>0.75?(1-lr)/0.25:1;
     ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,6.28);
-    ctx.fillStyle='hsla('+p.hue+',75%,72%,'+(p.a*fade)+')'; ctx.fill();
+    ctx.fillStyle='hsla('+p.hue+',75%,70%,'+(p.a*fade)+')';
+    ctx.fill();
   }
-  ctx.globalCompositeOperation='source-over';
 
   // Shooting stars
-  if (T >= nextMeteorAt) {
-    meteors.push(mkMeteor());
-    nextMeteorAt = T + 3 + Math.random() * 10;
-  }
-  ctx.globalCompositeOperation='screen';
-  for (var i=meteors.length-1;i>=0;i--) {
-    var m=meteors[i];
-    m.age += dt;
-    m.x   += m.vx * dt;
-    m.y   += m.vy * dt;
-    if (m.age > m.dur || m.y > H+60 || m.x < -150) { meteors.splice(i,1); continue; }
-    var fade = Math.max(0, 1 - m.age/m.dur);
-    var spd  = Math.sqrt(m.vx*m.vx + m.vy*m.vy);
-    var tx   = m.x - m.vx/spd*m.len;
-    var ty   = m.y - m.vy/spd*m.len;
-    var mg2  = ctx.createLinearGradient(tx,ty,m.x,m.y);
-    mg2.addColorStop(0,   'hsla('+m.hue+',80%,90%,0)');
-    mg2.addColorStop(0.7, 'hsla('+m.hue+',80%,88%,'+(m.a*fade*0.4)+')');
-    mg2.addColorStop(1,   'hsla('+m.hue+',90%,100%,'+(m.a*fade)+')');
+  if (T>=nextMeteorAt) { meteors.push(mkMeteor()); nextMeteorAt=T+5+Math.random()*12; }
+  for (var i=meteors.length-1; i>=0; i--) {
+    var m=meteors[i]; m.age+=dt; m.x+=m.vx*dt; m.y+=m.vy*dt;
+    if (m.age>m.dur||m.y>H+60||m.x<-150) { meteors.splice(i,1); continue; }
+    var fade=Math.max(0,1-m.age/m.dur);
+    var spd=Math.sqrt(m.vx*m.vx+m.vy*m.vy);
+    var tx=m.x-m.vx/spd*m.len, ty=m.y-m.vy/spd*m.len;
+    var mg2=ctx.createLinearGradient(tx,ty,m.x,m.y);
+    mg2.addColorStop(0,'hsla('+m.hue+',80%,90%,0)');
+    mg2.addColorStop(.7,'hsla('+m.hue+',80%,88%,'+(m.a*fade*.4)+')');
+    mg2.addColorStop(1,'hsla('+m.hue+',90%,100%,'+(m.a*fade)+')');
     ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(m.x,m.y);
     ctx.strokeStyle=mg2; ctx.lineWidth=m.w; ctx.lineCap='round'; ctx.stroke();
   }
-  ctx.globalCompositeOperation='source-over';
 
   // Landscape
-  ctx.drawImage(landCanvas,0,0);
+  ctx.drawImage(landCanvas, 0, 0);
 }
 
 resize();
-initStars();
 initParticles();
 requestAnimationFrame(loop);
 </script>
